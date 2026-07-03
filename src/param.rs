@@ -23,10 +23,18 @@ impl PoroLayer{
         3.0*(self.nu_u - self.nu)/((1.0-(2.0*self.nu))*(1.0+self.nu_u)*self.b)
     }
     pub fn q(&self) -> f64{
-        let inv_q = (9.0/2.0)*(1.0-(2.0*self.nu_u))*(self.nu_u-self.nu)/((1.0-(2.0*self.nu))*(1.0+self.nu_u).powi(2)*self.g*self.b.powi(2));
-        1.0/inv_q
+        1.0 / self.inv_q()
+    }
+    /// 1/Q, the specific storage coefficient at constant strain that multiplies
+    /// dp/dt in Eq. 2 of Zhai et al. (2019).
+    pub fn inv_q(&self) -> f64{
+        (9.0/2.0)*(1.0-(2.0*self.nu_u))*(self.nu_u-self.nu)/((1.0-(2.0*self.nu))*(1.0+self.nu_u).powi(2)*self.g*self.b.powi(2))
     }
     pub fn chi(&self)-> f64{
         (9.0/2.0)*(1.0-self.nu_u)*(self.nu_u-self.nu)*self.d/((1.0-self.nu)*(1.0+self.nu_u).powi(2)*self.g*self.b.powi(2))
+    }
+    /// Drained bulk modulus K = lambda + 2G/3.
+    pub fn k_dr(&self) -> f64 {
+        self.lambda() + 2.0 * self.g / 3.0
     }
 }
