@@ -1,3 +1,8 @@
 /target
 /injection_timeseries.csv
 /final_field.vtk
+
+# validation_plots build artifacts (regenerable)
+validation_plots/pptx_build/__pycache__/
+validation_plots/pptx_build/*.pdf
+validation_plots/pptx_build/*-slide-*.png
