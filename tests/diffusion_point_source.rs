@@ -43,7 +43,7 @@ fn matches_analytical_continuous_point_source() {
     for _ in 0..n_steps {
         t += dt;
         let source = well.source_field(&grid, t);
-        let (p_new, _) = solve_diffusion(&p, &source, &grid, chi, inv_q, dt, 1e-10, 5000);
+        let (p_new, _) = solve_diffusion(&p, &p, 0.0, &source, &grid, chi, inv_q, dt, 1e-10, 5000);
         p = p_new;
     }
 

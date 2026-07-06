@@ -9,6 +9,15 @@ folds in q and the (already time-differenced) mechanical coupling term:
 
     (1/(Q*dt)) p^{n+1} - div(chi * grad p^{n+1}) = source + (1/(Q*dt)) p^n
 
+`solve_diffusion` additionally supports the fixed-stress split stabilization
+term (see coupling.rs): passing beta > 0 and the previous outer-iteration
+pressure `p_iter` solves instead
+
+    (1/Q + beta)/dt * p^{l+1} - div(chi*grad p^{l+1})
+        = source + beta/dt * p^{l} + (1/Q)/dt * p^n
+
+which reduces to the plain equation above when beta = 0 and p_iter = p_n.
+
 Boundary conditions:
   * z = 0 (free surface): drained, p = 0 (Dirichlet).
   * all other faces: no-flow (homogeneous Neumann), approximating a domain
@@ -64,12 +73,21 @@ pub fn apply_diffusion_operator(p: &[f64], grid: &Grid3D, chi: f64, coeff: f64) 
     out
 }
 
-/// Solve the implicit pressure update for one time step.
+/// Solve the implicit pressure update for one time step, with optional
+/// fixed-stress split stabilization.
 ///
 /// `source` should already contain q(x, t^{n+1}) minus the mechanical
-/// coupling term alpha*(div(u^{n+1}) - div(u^n))/dt.
+/// coupling term alpha*(div(u^{l}) - div(u^n))/dt, where u^l is the most
+/// recent mechanics iterate (equal to u^n on the first outer iteration).
+///
+/// `p_n` is the pressure at the start of the time step; `p_iter` is the
+/// pressure from the previous outer (Picard) iteration (equal to `p_n` on
+/// the first iteration). `beta` is the fixed-stress stabilization
+/// coefficient alpha^2/K_dr; pass 0.0 to recover the unstabilized scheme.
 pub fn solve_diffusion(
     p_n: &Field3D,
+    p_iter: &Field3D,
+    beta: f64,
     source: &Field3D,
     grid: &Grid3D,
     chi: f64,
@@ -78,11 +96,11 @@ pub fn solve_diffusion(
     tol: f64,
     max_iter: usize,
 ) -> (Field3D, usize) {
-    let coeff = inv_q / dt;
+    let coeff = (inv_q + beta) / dt;
     let n = grid.n();
     let mut b = vec![0.0; n];
     for idx in 0..n {
-        b[idx] = source.data[idx] + coeff * p_n.data[idx];
+        b[idx] = source.data[idx] + (inv_q / dt) * p_n.data[idx] + (beta / dt) * p_iter.data[idx];
     }
     for j in 0..grid.ny {
         for i in 0..grid.nx {
@@ -92,7 +110,7 @@ pub fn solve_diffusion(
     let (sol, iters) = conjugate_gradient(
         |v| apply_diffusion_operator(v, grid, chi, coeff),
         &b,
-        p_n.data.clone(),
+        p_iter.data.clone(),
         tol,
         max_iter,
     );

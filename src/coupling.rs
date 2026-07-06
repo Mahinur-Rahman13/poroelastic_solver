@@ -1,12 +1,13 @@
 /*Coupling Module
 Time-stepping driver that couples the elasticity (Eq. 1) and diffusion
-(Eq. 2) solves at each step using a Picard (block Gauss-Seidel) iteration:
-given a guess of p, solve for u, recompute the strain-rate source this
-implies for the pressure equation, resolve p, and repeat until p stops
-changing. This is a simpler (if not maximally fast-converging) alternative
-to the "fixed-stress split" scheme used in the poromechanics literature; it
-is easy to reason about and converges for the moderate coupling strengths
-typical of crustal rock properties.
+(Eq. 2) solves at each step using the fixed-stress split iteration (Kim,
+Tchelepi & Juanes 2011; Mikelic & Wheeler 2013): each outer iteration first
+solves the flow equation at fixed total stress -- which adds a
+stabilization term beta = alpha^2/K_dr to the pressure equation's storage
+coefficient -- and then resolves the mechanics with the updated pressure.
+This scheme is unconditionally stable regardless of coupling strength,
+unlike a plain Picard iteration (no stabilization term), which can and does
+diverge for strongly-coupled media (alpha close to 1).
 */
 use crate::diffusion::solve_diffusion;
 use crate::elasticity::{divergence, solve_elasticity};
@@ -102,32 +103,38 @@ pub fn step(
     let alpha = params.alpha();
     let chi = params.chi();
     let inv_q = params.inv_q();
+    let beta = alpha * alpha / params.k_dr();
 
     let p_n = state.p.clone();
     let div_u_n = divergence(&state.u, grid, lambda, g);
 
-    let mut p_star = p_n.clone();
+    let mut p_iter = p_n.clone();
+    let mut div_u_iter = div_u_n.clone();
     let mut u_current = state.u.clone();
     let mut last_change = f64::INFINITY;
     let mut iters = 0;
 
+    let n = grid.n();
     for it in 0..tol.picard_max_iter {
         iters = it + 1;
 
-        let rhs = alpha_grad_p(&p_star, grid, alpha);
-        let (u_new, _) = solve_elasticity(&rhs, grid, g, lambda, u_current.clone(), tol.cg_tol, tol.cg_max_iter);
-
-        let div_u_new = divergence(&u_new, grid, lambda, g);
-
-        let n = grid.n();
+        // Flow step: solve for pressure at fixed total stress, using the
+        // volumetric strain from the previous mechanics iterate.
         let mut source = Field3D::zeros(grid);
         for idx in 0..n {
-            source.data[idx] = q_field.data[idx] - alpha * (div_u_new.data[idx] - div_u_n.data[idx]) / dt;
+            source.data[idx] = q_field.data[idx] - alpha * (div_u_iter.data[idx] - div_u_n.data[idx]) / dt;
         }
-        let (p_new, _) = solve_diffusion(&p_n, &source, grid, chi, inv_q, dt, tol.cg_tol, tol.cg_max_iter);
+        let (p_new, _) =
+            solve_diffusion(&p_n, &p_iter, beta, &source, grid, chi, inv_q, dt, tol.cg_tol, tol.cg_max_iter);
 
-        let change = max_abs_diff(&p_new, &p_star);
-        p_star = p_new;
+        // Mechanics step: resolve displacement with the updated pressure.
+        let rhs = alpha_grad_p(&p_new, grid, alpha);
+        let (u_new, _) = solve_elasticity(&rhs, grid, g, lambda, u_current.clone(), tol.cg_tol, tol.cg_max_iter);
+        let div_u_new = divergence(&u_new, grid, lambda, g);
+
+        let change = max_abs_diff(&p_new, &p_iter);
+        p_iter = p_new;
+        div_u_iter = div_u_new;
         u_current = u_new;
         last_change = change;
         if change < tol.picard_tol {
@@ -136,6 +143,6 @@ pub fn step(
     }
 
     state.u = u_current;
-    state.p = p_star;
+    state.p = p_iter;
     StepReport { picard_iters: iters, last_p_change: last_change }
 }
